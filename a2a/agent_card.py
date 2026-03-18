@@ -1,3 +1,5 @@
+import os
+
 from a2a.types import AgentCard, AgentSkill, AgentCapabilities
 
 
@@ -8,7 +10,7 @@ RESEARCH_AGENT_CARD = AgentCard(
         "academic papers from arXiv. Specializes in AI, ML, computer science, "
         "and scientific research literature."
     ),
-    url="http://localhost:9002",
+    url=os.getenv("AGENT_PUBLIC_URL", "http://localhost:9002"),
     version="1.0.0",
     skills=[
         AgentSkill(
