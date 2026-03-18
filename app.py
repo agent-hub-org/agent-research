@@ -1,11 +1,13 @@
 import logging
 from contextlib import asynccontextmanager
 
+import uvicorn
 from fastapi import FastAPI
 from pydantic import BaseModel
 
-from agents.agent import run_query
+from agents.agent import create_agent, run_query
 from database.mongo import MongoDB
+from a2a.server import create_a2a_app
 
 logging.basicConfig(
     level=logging.INFO,
@@ -17,8 +19,14 @@ logger = logging.getLogger("agent_research.api")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Connect MCP servers on startup
+    agent = create_agent()
+    await agent._ensure_initialized()
+    logger.info("MCP servers connected, agent ready")
     yield
+    await agent._disconnect_mcp()
     await MongoDB.close()
+    logger.info("Shutdown complete")
 
 
 app = FastAPI(
@@ -26,6 +34,10 @@ app = FastAPI(
     description="Ask research questions and get AI-powered summaries from arXiv papers.",
     lifespan=lifespan,
 )
+
+# Mount the A2A server as a sub-application
+a2a_app = create_a2a_app()
+app.mount("/a2a", a2a_app.build())
 
 
 class AskRequest(BaseModel):
@@ -86,4 +98,8 @@ async def get_history(session_id: str):
 
 @app.get("/health")
 async def health():
-    return {"status": "ok"}
+    return {"status": "ok", "service": "agent-research"}
+
+
+if __name__ == "__main__":
+    uvicorn.run(app, host="0.0.0.0", port=8081)
