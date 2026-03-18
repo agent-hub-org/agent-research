@@ -26,5 +26,7 @@ RESEARCH_AGENT_CARD = AgentCard(
             tags=["research", "AI", "ML", "review", "synthesis"],
         ),
     ],
+    defaultInputModes=["text"],
+    defaultOutputModes=["text"],
     capabilities=AgentCapabilities(streaming=False, pushNotifications=False),
 )
