@@ -1,8 +1,11 @@
 import logging
 from datetime import datetime, timezone
 
+from langgraph.checkpoint.mongodb.aio import AsyncMongoDBSaver
+
 from agent_sdk.agents import BaseAgent
 from database.memory import get_memories, save_memory
+from database.mongo import MongoDB
 
 logger = logging.getLogger("agent_research.agent")
 
@@ -87,21 +90,20 @@ def create_agent() -> BaseAgent:
     global _agent_instance
     if _agent_instance is None:
         logger.info("Creating research agent (singleton) with MCP servers")
+        checkpointer = AsyncMongoDBSaver(MongoDB.get_client(), db_name="agent_research")
         _agent_instance = BaseAgent(
             tools=[],
             mcp_servers=MCP_SERVERS,
             system_prompt=SYSTEM_PROMPT,
+            checkpointer=checkpointer,
         )
     return _agent_instance
 
 
-async def run_query(query: str, session_id: str = "default") -> dict:
-    logger.info("run_query called — session='%s', query='%s'", session_id, query[:100])
-
-    # --- Fetch long-term memories from Mem0 ---
+def _build_enriched_prompt(session_id: str, query: str) -> str:
+    """Build system prompt enriched with date context and long-term memories."""
     memories = get_memories(user_id=session_id, query=query)
 
-    # Inject the current date so the LLM grounds searches in the right timeframe
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     date_block = (
         f"\n\nTODAY'S DATE: {today}\n"
@@ -109,7 +111,6 @@ async def run_query(query: str, session_id: str = "default") -> dict:
         "to get the latest papers and developments."
     )
 
-    # Dynamically enrich the system prompt with any known user context
     if memories:
         memory_block = "\n".join(f"- {m}" for m in memories)
         enriched_prompt = (
@@ -121,12 +122,38 @@ async def run_query(query: str, session_id: str = "default") -> dict:
     else:
         enriched_prompt = SYSTEM_PROMPT + date_block
 
-    # --- Run the singleton agent (checkpointer persists across calls per session) ---
+    return enriched_prompt
+
+
+async def run_query(query: str, session_id: str = "default") -> dict:
+    logger.info("run_query called — session='%s', query='%s'", session_id, query[:100])
+
+    enriched_prompt = _build_enriched_prompt(session_id, query)
+
     agent = create_agent()
     result = await agent.arun(query, session_id=session_id, system_prompt=enriched_prompt)
     logger.info("run_query finished — session='%s', steps: %d", session_id, len(result["steps"]))
 
-    # --- Save this conversation turn back to Mem0 ---
     save_memory(user_id=session_id, query=query, response=result["response"])
 
     return result
+
+
+async def stream_query(query: str, session_id: str = "default"):
+    """Async generator that yields text chunks for SSE streaming."""
+    logger.info("stream_query called — session='%s', query='%s'", session_id, query[:100])
+
+    enriched_prompt = _build_enriched_prompt(session_id, query)
+
+    agent = create_agent()
+    full_response = []
+
+    async for chunk in agent.astream(query, session_id=session_id, system_prompt=enriched_prompt):
+        full_response.append(chunk)
+        yield chunk
+
+    # Save the complete response to Mem0 after streaming finishes
+    response_text = "".join(full_response)
+    save_memory(user_id=session_id, query=query, response=response_text)
+    logger.info("stream_query finished — session='%s', response length: %d chars",
+                session_id, len(response_text))
