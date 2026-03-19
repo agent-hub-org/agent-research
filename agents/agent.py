@@ -145,6 +145,15 @@ async def run_query(query: str, session_id: str = "default") -> dict:
     return result
 
 
+def create_stream(query: str, session_id: str = "default"):
+    """Create a StreamResult for the query. Returns the stream object directly."""
+    logger.info("create_stream called — session='%s', query='%s'", session_id, query[:100])
+
+    enriched_prompt = _build_enriched_prompt(session_id, query)
+    agent = create_agent()
+    return agent.astream(query, session_id=session_id, system_prompt=enriched_prompt)
+
+
 async def stream_query(query: str, session_id: str = "default"):
     """Async generator that yields text chunks for SSE streaming."""
     logger.info("stream_query called — session='%s', query='%s'", session_id, query[:100])
