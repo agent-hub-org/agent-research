@@ -82,6 +82,22 @@ MCP_SERVERS = {
 _agent_instance: BaseAgent | None = None
 _checkpointer: AsyncMongoDBSaver | None = None
 
+RESPONSE_FORMAT_INSTRUCTIONS = {
+    "summary": (
+        "\n\nRESPONSE FORMAT OVERRIDE: The user wants a QUICK SUMMARY. "
+        "Keep your response concise — 5-7 bullet points maximum. "
+        "Focus on key findings and takeaways. Skip lengthy explanations."
+    ),
+    "flash_cards": (
+        "\n\nRESPONSE FORMAT OVERRIDE: The user wants FLASH CARDS. "
+        "Format your entire response as a series of flash cards using this format:\n"
+        "**Q:** [question about a key concept/finding]\n"
+        "**A:** [concise answer]\n\n"
+        "Generate 8-12 flash cards covering the most important research findings."
+    ),
+    "detailed": "",
+}
+
 
 def _get_checkpointer() -> AsyncMongoDBSaver:
     global _checkpointer
@@ -106,8 +122,8 @@ def create_agent() -> BaseAgent:
     return _agent_instance
 
 
-def _build_enriched_prompt(session_id: str, query: str) -> str:
-    """Build system prompt enriched with date context and long-term memories."""
+def _build_enriched_prompt(session_id: str, query: str, response_format: str | None = None) -> str:
+    """Build system prompt enriched with date context, memories, and response format."""
     memories = get_memories(user_id=session_id, query=query)
 
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
@@ -117,27 +133,29 @@ def _build_enriched_prompt(session_id: str, query: str) -> str:
         "to get the latest papers and developments."
     )
 
+    enriched_prompt = SYSTEM_PROMPT + date_block
+
     if memories:
         memory_block = "\n".join(f"- {m}" for m in memories)
-        enriched_prompt = (
-            SYSTEM_PROMPT
-            + date_block
-            + f"\n\nCONTEXT ABOUT THIS USER (from long-term memory, use this to personalize your response):\n{memory_block}"
-        )
+        enriched_prompt += f"\n\nCONTEXT ABOUT THIS USER (from long-term memory, use this to personalize your response):\n{memory_block}"
         logger.info("Injected %d memories into system_prompt for session='%s'", len(memories), session_id)
-    else:
-        enriched_prompt = SYSTEM_PROMPT + date_block
+
+    format_instruction = RESPONSE_FORMAT_INSTRUCTIONS.get(response_format or "detailed", "")
+    if format_instruction:
+        enriched_prompt += format_instruction
 
     return enriched_prompt
 
 
-async def run_query(query: str, session_id: str = "default") -> dict:
-    logger.info("run_query called — session='%s', query='%s'", session_id, query[:100])
+async def run_query(query: str, session_id: str = "default",
+                    response_format: str | None = None, model_id: str | None = None) -> dict:
+    logger.info("run_query called — session='%s', query='%s', model='%s'",
+                session_id, query[:100], model_id or "default")
 
-    enriched_prompt = _build_enriched_prompt(session_id, query)
+    enriched_prompt = _build_enriched_prompt(session_id, query, response_format=response_format)
 
     agent = create_agent()
-    result = await agent.arun(query, session_id=session_id, system_prompt=enriched_prompt)
+    result = await agent.arun(query, session_id=session_id, system_prompt=enriched_prompt, model_id=model_id)
     logger.info("run_query finished — session='%s', steps: %d", session_id, len(result["steps"]))
 
     save_memory(user_id=session_id, query=query, response=result["response"])
@@ -145,13 +163,15 @@ async def run_query(query: str, session_id: str = "default") -> dict:
     return result
 
 
-def create_stream(query: str, session_id: str = "default"):
+def create_stream(query: str, session_id: str = "default",
+                  response_format: str | None = None, model_id: str | None = None):
     """Create a StreamResult for the query. Returns the stream object directly."""
-    logger.info("create_stream called — session='%s', query='%s'", session_id, query[:100])
+    logger.info("create_stream called — session='%s', query='%s', model='%s'",
+                session_id, query[:100], model_id or "default")
 
-    enriched_prompt = _build_enriched_prompt(session_id, query)
+    enriched_prompt = _build_enriched_prompt(session_id, query, response_format=response_format)
     agent = create_agent()
-    return agent.astream(query, session_id=session_id, system_prompt=enriched_prompt)
+    return agent.astream(query, session_id=session_id, system_prompt=enriched_prompt, model_id=model_id)
 
 
 async def stream_query(query: str, session_id: str = "default"):
