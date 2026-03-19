@@ -58,8 +58,8 @@ python-dotenv = ">=1.2.2,<2.0.0"
 [package.source]
 type = "git"
 url = "https://github.com/pranjalv23/agent-sdk.git"
-reference = "v0.1.9"
-resolved_reference = "634f67727438d5d0a125d86866cff583bc6ff98c"
+reference = "v0.1.10"
+resolved_reference = "f45e097934e3713c772c237bc560f7c06da2157b"
 
 [[package]]
 name = "aiohappyeyeballs"
@@ -4828,4 +4828,4 @@ cffi = ["cffi (>=1.17,<2.0) ; platform_python_implementation != \"PyPy\" and pyt
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.13,<3.14"
-content-hash = "a125cd2571c8f11316b1fdd6230f45964b998afc671aa7ca0a2335759e982556"
+content-hash = "659ef47bdcfe891470798a9e683aefb79df3598b6ca0a513957dd88c88fcd5ed"
