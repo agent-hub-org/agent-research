@@ -89,11 +89,12 @@ RESPONSE_FORMAT_INSTRUCTIONS = {
         "Focus on key findings and takeaways. Skip lengthy explanations."
     ),
     "flash_cards": (
-        "\n\nRESPONSE FORMAT OVERRIDE: The user wants FLASH CARDS. "
-        "Format your entire response as a series of flash cards using this format:\n"
-        "**Q:** [question about a key concept/finding]\n"
-        "**A:** [concise answer]\n\n"
-        "Generate 8-12 flash cards covering the most important research findings."
+        "\n\nRESPONSE FORMAT OVERRIDE: The user wants INSIGHT CARDS. "
+        "Format your response as a series of insight cards using this exact format for each card:\n\n"
+        "### [Topic Label]\n"
+        "**Key Insight:** [The main finding or takeaway — keep it short and prominent]\n"
+        "[1-2 sentence explanation with context]\n\n"
+        "Generate 8-12 cards covering the most important research findings and takeaways."
     ),
     "detailed": "",
 }
