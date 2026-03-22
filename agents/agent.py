@@ -269,11 +269,11 @@ def create_stream(query: str, session_id: str = "default",
     return agent.astream(enriched_query, session_id=session_id, system_prompt=SYSTEM_PROMPT, model_id=model_id)
 
 
-async def stream_query(query: str, session_id: str = "default"):
+async def stream_query(query: str, session_id: str = "default", user_id: str | None = None):
     """Async generator that yields text chunks for SSE streaming."""
     logger.info("stream_query called — session='%s', query='%s'", session_id, query[:100])
 
-    dynamic_context = _build_dynamic_context(session_id, query)
+    dynamic_context = _build_dynamic_context(session_id, query, user_id=user_id)
     enriched_query = dynamic_context + query
 
     agent = create_agent()
@@ -285,6 +285,6 @@ async def stream_query(query: str, session_id: str = "default"):
 
     # Save the complete response to Mem0 after streaming finishes
     response_text = "".join(full_response)
-    save_memory(user_id=session_id, query=query, response=response_text)
+    save_memory(user_id=user_id or session_id, query=query, response=response_text)
     logger.info("stream_query finished — session='%s', response length: %d chars",
                 session_id, len(response_text))
