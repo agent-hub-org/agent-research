@@ -72,12 +72,25 @@ then use those specific terms to search arXiv.
 
 ## Behavioral Rule
 
-Do NOT narrate your thought process or announce your steps. \
-Never write "Step 1:", "Step 2:", "First, I'll...", "Let me check...", \
-"Let's assume...", or similar preambles. \
-Call tools silently and only write text when you are delivering the final \
-synthesized answer to the user. If a tool call fails, just move to the next \
-tool — do not announce the failure in prose.
+Never narrate ANY part of your internal process. This is absolute — no exceptions. \
+Forbidden categories (not exhaustive — the spirit of the rule covers all similar phrasing):
+- Planning announcements: "Let me...", "Let's...", "I'll...", "First, I will...", "Step N:"
+- Tool discovery narration: "Let's check if...", "I'll start by looking...", "Let me search..."
+- Tool result narration: "Since there are no papers...", "The DB contains...", "I found..."
+- Failure/retry narration: "It seems there was an issue...", "Let's try a different approach...", \
+  "Unfortunately...", "Due to rate limiting..."
+- Transition phrases: "Now let's...", "Next, I'll...", "Moving on to..."
+
+Call tools silently. If a tool fails, silently try the next one. \
+Only write text when delivering the final synthesized answer.
+
+## Math & Equations
+
+When writing mathematical expressions or equations:
+- Use Markdown math notation, NOT LaTeX parenthesis delimiters.
+- Inline math: $expression$ (e.g., $i_t = \\sigma(W_i \\cdot [h_{t-1}, x_t] + b_i)$)
+- Block/display math: $$expression$$ on its own line
+- Never use bare (expression) or \\(expression\\) as math delimiters — these render as plaintext.
 """
 
 # MCP server configuration — all tools served from a single combined MCP server
@@ -138,29 +151,30 @@ def create_agent() -> BaseAgent:
     return _agent_instance
 
 
-def _build_enriched_prompt(session_id: str, query: str, response_format: str | None = None) -> str:
-    """Build system prompt enriched with date context, memories, and response format."""
+def _build_dynamic_context(session_id: str, query: str, response_format: str | None = None) -> str:
+    """Build dynamic context block (date, memories, format instructions) to prepend to the user query."""
     memories = get_memories(user_id=session_id, query=query)
 
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    date_block = (
-        f"\n\nTODAY'S DATE: {today}\n"
-        "When searching for recent research, include the current year in your queries "
+    year = today[:4]
+
+    parts = []
+    parts.append(
+        f"Today's date: {today}. Include the current year ({year}) in search queries "
         "to get the latest papers and developments."
     )
 
-    enriched_prompt = SYSTEM_PROMPT + date_block
-
     if memories:
-        memory_block = "\n".join(f"- {m}" for m in memories)
-        enriched_prompt += f"\n\nCONTEXT ABOUT THIS USER (from long-term memory, use this to personalize your response):\n{memory_block}"
-        logger.info("Injected %d memories into system_prompt for session='%s'", len(memories), session_id)
+        memory_lines = "\n".join(f"- {m}" for m in memories)
+        parts.append(f"User context (long-term memory):\n{memory_lines}")
+        logger.info("Injected %d memories into context for session='%s'", len(memories), session_id)
 
     format_instruction = RESPONSE_FORMAT_INSTRUCTIONS.get(response_format or "detailed", "")
     if format_instruction:
-        enriched_prompt += format_instruction
+        parts.append(format_instruction.strip())
 
-    return enriched_prompt
+    context_block = "\n\n".join(parts)
+    return f"[CONTEXT]\n{context_block}\n[/CONTEXT]\n\n"
 
 
 async def run_query(query: str, session_id: str = "default",
@@ -168,10 +182,11 @@ async def run_query(query: str, session_id: str = "default",
     logger.info("run_query called — session='%s', query='%s', model='%s'",
                 session_id, query[:100], model_id or "default")
 
-    enriched_prompt = _build_enriched_prompt(session_id, query, response_format=response_format)
+    dynamic_context = _build_dynamic_context(session_id, query, response_format=response_format)
+    enriched_query = dynamic_context + query
 
     agent = create_agent()
-    result = await agent.arun(query, session_id=session_id, system_prompt=enriched_prompt, model_id=model_id)
+    result = await agent.arun(enriched_query, session_id=session_id, system_prompt=SYSTEM_PROMPT, model_id=model_id)
     logger.info("run_query finished — session='%s', steps: %d", session_id, len(result["steps"]))
 
     save_memory(user_id=session_id, query=query, response=result["response"])
@@ -185,21 +200,23 @@ def create_stream(query: str, session_id: str = "default",
     logger.info("create_stream called — session='%s', query='%s', model='%s'",
                 session_id, query[:100], model_id or "default")
 
-    enriched_prompt = _build_enriched_prompt(session_id, query, response_format=response_format)
+    dynamic_context = _build_dynamic_context(session_id, query, response_format=response_format)
+    enriched_query = dynamic_context + query
     agent = create_agent()
-    return agent.astream(query, session_id=session_id, system_prompt=enriched_prompt, model_id=model_id)
+    return agent.astream(enriched_query, session_id=session_id, system_prompt=SYSTEM_PROMPT, model_id=model_id)
 
 
 async def stream_query(query: str, session_id: str = "default"):
     """Async generator that yields text chunks for SSE streaming."""
     logger.info("stream_query called — session='%s', query='%s'", session_id, query[:100])
 
-    enriched_prompt = _build_enriched_prompt(session_id, query)
+    dynamic_context = _build_dynamic_context(session_id, query)
+    enriched_query = dynamic_context + query
 
     agent = create_agent()
     full_response = []
 
-    async for chunk in agent.astream(query, session_id=session_id, system_prompt=enriched_prompt):
+    async for chunk in agent.astream(enriched_query, session_id=session_id, system_prompt=SYSTEM_PROMPT):
         full_response.append(chunk)
         yield chunk
 
