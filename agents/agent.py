@@ -69,6 +69,15 @@ then use those specific terms to search arXiv.
 7. Synthesize everything into a clear, structured response.
 
 **Always cite paper titles and authors when referencing academic work.**
+
+## Behavioral Rule
+
+Do NOT narrate your thought process or announce your steps. \
+Never write "Step 1:", "Step 2:", "First, I'll...", "Let me check...", \
+"Let's assume...", or similar preambles. \
+Call tools silently and only write text when you are delivering the final \
+synthesized answer to the user. If a tool call fails, just move to the next \
+tool — do not announce the failure in prose.
 """
 
 # MCP server configuration — all tools served from a single combined MCP server
