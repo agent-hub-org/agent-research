@@ -129,23 +129,6 @@ Rules:
 - Number citations in the order they first appear in the response
 - If no tools were used (pure general-knowledge answer), omit the Sources section entirely
 
-## Math & Equations
-
-CRITICAL: Always use Markdown math notation. NEVER use LaTeX parenthesis delimiters.
-
-WRONG — do not use these:
-  \\(x^2 + y^2\\)          ← renders as plaintext
-  \\[E = mc^2\\]           ← renders as plaintext
-
-CORRECT — always use these:
-  $x^2 + y^2$              ← inline math (single dollar signs)
-  $$E = mc^2$$             ← display/block math (double dollar signs, on its own line)
-
-Rules:
-- Inline math: $expression$
-- Block/display math: $$expression$$ on its own line
-- Never use \\(...\\), \\[...\\], or bare (expression) as math delimiters — they render as plaintext
-
 ## Behavioral Rule
 
 Never narrate ANY part of your internal process. This is absolute — no exceptions. \
