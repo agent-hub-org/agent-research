@@ -2,6 +2,8 @@ import asyncio
 import json
 import logging
 import os
+import time
+import threading
 import uuid
 from contextlib import asynccontextmanager
 import uvicorn
@@ -121,18 +123,20 @@ class LockCache:
         self._locks = {}
         self._timestamps = {}
         self._ttl = ttl
+        self._mutex = threading.Lock()
 
     def get_lock(self, session_id: str) -> asyncio.Lock:
-        now = time.time()
-        expired = [sid for sid, ts in self._timestamps.items() if now - ts > self._ttl]
-        for sid in expired:
-            if sid in self._locks and not self._locks[sid].locked():
-                del self._locks[sid]
-                del self._timestamps[sid]
-        if session_id not in self._locks:
-            self._locks[session_id] = asyncio.Lock()
-        self._timestamps[session_id] = now
-        return self._locks[session_id]
+        with self._mutex:
+            now = time.time()
+            expired = [sid for sid, ts in self._timestamps.items() if now - ts > self._ttl]
+            for sid in expired:
+                if sid in self._locks and not self._locks[sid].locked():
+                    del self._locks[sid]
+                    del self._timestamps[sid]
+            if session_id not in self._locks:
+                self._locks[session_id] = asyncio.Lock()
+            self._timestamps[session_id] = now
+            return self._locks[session_id]
 
 _session_locks = LockCache()
 
@@ -188,12 +192,12 @@ async def ask(body: AskRequest, request: Request):
 @app.post("/ask/stream")
 @limiter.limit("30/minute")
 async def ask_stream(body: AskRequest, request: Request):
-    user_id = request.headers.get("X-User-Id") or None
     """Stream the agent's response as Server-Sent Events (SSE).
 
     Each event is a JSON object with a `text` field containing a chunk.
     The stream ends with a `[DONE]` sentinel.
     """
+    user_id = request.headers.get("X-User-Id") or None
     is_new = body.session_id is None
     session_id = body.session_id or MongoDB.generate_session_id()
 
@@ -221,7 +225,7 @@ async def ask_stream(body: AskRequest, request: Request):
             try:
                 while True:
                     await asyncio.sleep(_HEARTBEAT_INTERVAL)
-                    await queue.put(f": heartbeat {int(asyncio.get_event_loop().time())}\n\n")
+                    await queue.put(f": heartbeat {int(asyncio.get_running_loop().time())}\n\n")
             except asyncio.CancelledError:
                 pass
 
