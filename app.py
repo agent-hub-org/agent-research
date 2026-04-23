@@ -2,9 +2,8 @@ import asyncio
 import json
 import logging
 import os
-import time
-import threading
 import uuid
+from collections import defaultdict
 from contextlib import asynccontextmanager
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request, status
@@ -35,8 +34,14 @@ async def lifespan(app: FastAPI):
         logger.warning("INTERNAL_API_KEY is not set — internal API is unprotected. Set this in production.")
     # Connect MCP servers on startup
     agent = create_agent()
-    await agent._ensure_initialized()
-    logger.info("MCP servers connected, agent ready")
+    try:
+        await agent._ensure_initialized()
+        if getattr(agent, '_degraded', False):
+            logger.warning("Agent started in DEGRADED mode — MCP tools unavailable")
+        else:
+            logger.info("MCP servers connected, agent ready")
+    except Exception as e:
+        logger.error("Agent initialization failed (continuing without MCP): %s", e)
     await MongoDB.ensure_indexes()
     yield
     await agent._disconnect_mcp()
@@ -118,30 +123,10 @@ class HistoryResponse(BaseModel):
     history: list[dict]
 
 
-class LockCache:
-    def __init__(self, ttl: int = 3600):
-        self._locks = {}
-        self._timestamps = {}
-        self._ttl = ttl
-        self._mutex = threading.Lock()
-
-    def get_lock(self, session_id: str) -> asyncio.Lock:
-        with self._mutex:
-            now = time.time()
-            expired = [sid for sid, ts in self._timestamps.items() if now - ts > self._ttl]
-            for sid in expired:
-                if sid in self._locks and not self._locks[sid].locked():
-                    del self._locks[sid]
-                    del self._timestamps[sid]
-            if session_id not in self._locks:
-                self._locks[session_id] = asyncio.Lock()
-            self._timestamps[session_id] = now
-            return self._locks[session_id]
-
-_session_locks = LockCache()
+_session_locks: dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
 
 def get_session_lock(session_id: str) -> asyncio.Lock:
-    return _session_locks.get_lock(session_id)
+    return _session_locks[session_id]
 
 
 # ── Agent endpoints ──
@@ -218,7 +203,7 @@ async def ask_stream(body: AskRequest, request: Request):
 
     async def event_stream():
         full_response = []
-        queue = asyncio.Queue()
+        queue = asyncio.Queue(maxsize=100)
         _HEARTBEAT_INTERVAL = 15.0
 
         async def heartbeat_worker():
@@ -234,7 +219,11 @@ async def ask_stream(body: AskRequest, request: Request):
                 async with get_session_lock(session_id):
                     async with asyncio.timeout(_STREAM_TIMEOUT):
                         async for chunk in StreamingMathFixer(stream):
-                            await queue.put(chunk)
+                            try:
+                                await asyncio.wait_for(queue.put(chunk), timeout=30.0)
+                            except asyncio.TimeoutError:
+                                logger.warning("Stream queue full for session='%s' — client likely disconnected", session_id)
+                                return
             except TimeoutError:
                 logger.error("Stream timed out after %.0fs", _STREAM_TIMEOUT)
                 await queue.put(f"__ERROR__:Response timed out after {_STREAM_TIMEOUT:.0f} seconds.")
@@ -242,7 +231,10 @@ async def ask_stream(body: AskRequest, request: Request):
                 logger.error("Stream failed: %s", e)
                 await queue.put("__ERROR__:An internal error occurred while generating the response.")
             finally:
-                await queue.put(None)
+                try:
+                    queue.put_nowait(None)
+                except asyncio.QueueFull:
+                    pass
 
         heartbeat_task = asyncio.create_task(heartbeat_worker())
         agent_task = asyncio.create_task(agent_worker())
@@ -283,7 +275,11 @@ async def ask_stream(body: AskRequest, request: Request):
             yield f"data: {json.dumps({'session_id': session_id})}\n\n"
         finally:
             heartbeat_task.cancel()
-            await agent_task
+            agent_task.cancel()
+            try:
+                await agent_task
+            except asyncio.CancelledError:
+                pass
             yield "data: [DONE]\n\n"
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
