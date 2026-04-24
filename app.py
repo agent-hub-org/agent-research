@@ -17,6 +17,8 @@ from slowapi.util import get_remote_address
 
 from agent_sdk.logging import configure_logging
 from agent_sdk.context import request_id_var, user_id_var
+from agent_sdk.utils.env import validate_required_env_vars
+from agent_sdk.server.error_handlers import register_error_handlers
 from agent_sdk.metrics import metrics_response
 from agent_sdk.server.streaming import StreamingMathFixer, _fix_math_delimiters
 from agents.agent import create_agent, run_query, stream_query, create_stream, save_memory
@@ -31,6 +33,11 @@ limiter = Limiter(key_func=get_remote_address)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    validate_required_env_vars(
+        ["MONGO_URI", "AZURE_AI_FOUNDRY_ENDPOINT", "AZURE_AI_FOUNDRY_API_KEY",
+         "PINECONE_API_KEY", "TAVILY_API_KEY"],
+        "agent-research",
+    )
     if not os.getenv("INTERNAL_API_KEY"):
         logger.warning("INTERNAL_API_KEY is not set — internal API is unprotected. Set this in production.")
     # Connect MCP servers on startup
@@ -58,6 +65,7 @@ app = FastAPI(
 
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+register_error_handlers(app)
 
 _raw_origins = os.getenv("ALLOWED_ORIGINS", "http://localhost:3000,http://localhost:5173")
 _allowed_origins = [o.strip() for o in _raw_origins.split(",") if o.strip()]
