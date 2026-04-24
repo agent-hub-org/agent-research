@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 import asyncio
 from agent_sdk.agents import BaseAgent
 from agent_sdk.checkpoint import AsyncMongoDBSaver
+from agent_sdk.checkpoint_resilient import ResilientCheckpointer
 from agent_sdk.database.memory import get_memories, save_memory
 from database.mongo import MongoDB
 
@@ -169,6 +170,7 @@ _ALLOWED_TOOLS = [
     "tavily_quick_search",
     "firecrawl_deep_scrape",
     "retrieve_papers",
+    "hybrid_retrieve_papers",
     "download_and_store_arxiv_papers",
 ]
 
@@ -215,14 +217,15 @@ def _build_system_prompt(response_format: str | None = None) -> str:
         return SYSTEM_PROMPT + "\n" + fmt
     return SYSTEM_PROMPT
 
-def _get_checkpointer() -> AsyncMongoDBSaver:
+def _get_checkpointer() -> ResilientCheckpointer:
     global _checkpointer
     if _checkpointer is None:
-        _checkpointer = AsyncMongoDBSaver.from_conn_string(
+        primary = AsyncMongoDBSaver.from_conn_string(
             conn_string=os.getenv("MONGO_URI", "mongodb://localhost:27017"),
             db_name=os.getenv("MONGO_DB_NAME", "agent_research"),
             ttl=int(os.getenv("CHECKPOINT_TTL_SECONDS", str(7 * 24 * 3600))),
         )
+        _checkpointer = ResilientCheckpointer(primary)
     return _checkpointer
 
 
@@ -235,6 +238,7 @@ def create_agent() -> BaseAgent:
             mcp_servers=MCP_SERVERS,
             system_prompt=SYSTEM_PROMPT,
             checkpointer=_get_checkpointer(),
+            mode="research",
             allowed_tools=_ALLOWED_TOOLS,
         )
     return _agent_instance
